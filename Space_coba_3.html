@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GCD Calculator - Globe dan Map 2D</title>
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      display: flex;
+      flex-direction: row;
+      height: 100vh;
+      color: #333;
+    }
+
+    #calculator {
+      background: linear-gradient(135deg, #007bff, #6c757d);
+      color: #fff;
+      padding: 20px;
+      width: 350px;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+      z-index: 10;
+      overflow-y: auto;
+    }
+
+    #calculator h1 {
+      font-size: 1.8em;
+      margin-bottom: 15px;
+      text-align: center;
+    }
+
+    label {
+      font-size: 1em;
+      margin-bottom: 5px;
+    }
+
+    input {
+      width: 100%;
+      padding: 10px;
+      margin-bottom: 15px;
+      border: none;
+      border-radius: 4px;
+      font-size: 1em;
+    }
+
+    button {
+      width: 100%;
+      padding: 12px;
+      background-color: #ff7f50;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      font-size: 1em;
+      font-weight: bold;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+    }
+
+    button:hover {
+      background-color: #ff4500;
+    }
+
+    #results {
+      margin-top: 15px;
+      padding: 10px;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 4px;
+      text-align: center;
+      font-size: 1em;
+    }
+
+    select {
+      width: 100%;
+      padding: 10px;
+      border: none;
+      border-radius: 4px;
+      font-size: 1em;
+      margin-top: 15px;
+    }
+
+    #map, #globe {
+      flex-grow: 1;
+      position: relative;
+      width: 100%;
+      height: 100vh;
+    }
+
+    #globe {
+      display: none;
+    }
+
+    @media (max-width: 768px) {
+      body {
+        flex-direction: column;
+      }
+
+      #calculator {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<div id="calculator">
+  <h1>GCD Calculator</h1>
+  <label for="lat1">Latitude Titik 1:</label>
+  <input type="number" id="lat1" placeholder="Contoh: -7.2575">
+  <label for="lon1">Longitude Titik 1:</label>
+  <input type="number" id="lon1" placeholder="Contoh: 112.7521">
+  <label for="lat2">Latitude Titik 2:</label>
+  <input type="number" id="lat2" placeholder="Contoh: 35.6895">
+  <label for="lon2">Longitude Titik 2:</label>
+  <input type="number" id="lon2" placeholder="Contoh: 139.6917">
+  <button id="calculate">Hitung</button>
+  <div id="results">Hasil akan muncul di sini</div>
+  <label for="mapSelect">Pilih Visualisasi:</label>
+  <select id="mapSelect">
+    <option value="globe">Globe</option>
+    <option value="2d" selected>Map 2D</option>
+  </select>
+</div>
+
+<div id="map"></div>
+<div id="globe"></div>
+
+<script>
+  let osmMap, currentMapType = '2d';
+
+  Math.radians = deg => deg * Math.PI / 180;
+  Math.degrees = rad => rad * 180 / Math.PI;
+
+  function haversine(lat1, lon1, lat2, lon2) {
+    const R = 6371;
+    const dlat = Math.radians(lat2 - lat1);
+    const dlon = Math.radians(lon2 - lon1);
+    const a = Math.sin(dlat / 2) ** 2 + Math.cos(Math.radians(lat1)) * Math.cos(Math.radians(lat2)) * Math.sin(dlon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(a));
+  }
+
+  function calculateBearings(lat1, lon1, lat2, lon2) {
+    const φ1 = Math.radians(lat1);
+    const φ2 = Math.radians(lat2);
+    const λ1 = Math.radians(lon1);
+    const λ2 = Math.radians(lon2);
+    const dλ = λ2 - λ1;
+
+    const y = Math.sin(dλ) * Math.cos(φ2);
+    const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(dλ);
+    const θ = Math.atan2(y, x);
+
+    const initialBearing = (Math.degrees(θ) + 360) % 360;
+    const finalBearing = (Math.degrees(Math.atan2(-y, -x)) + 360) % 360;
+
+    return { initial: initialBearing, final: finalBearing };
+  }
+
+  function initGlobe(lat1, lon1, lat2, lon2) {
+    document.getElementById('map').style.display = 'none';
+    document.getElementById('globe').style.display = 'block';
+
+    const path = { lat: [lat1, lat2], lon: [lon1, lon2] };
+    const data = [
+      {
+        type: 'scattergeo',
+        mode: 'lines+markers',
+        lon: path.lon,
+        lat: path.lat,
+        marker: { color: 'red', size: 5 },
+        line: { color: 'blue', width: 2 }
+      }
+    ];
+
+    const layout = {
+      geo: {
+        projection: {
+          type: "orthographic"
+        },
+        showland: true,
+        landcolor: "lightgray",  // updated land color
+        showocean: true,
+        oceancolor: "lightblue",  // updated ocean color
+        showlakes: false
+      }
+    };
+
+    Plotly.newPlot('globe', data, layout);
+  }
+
+  function init2DMap(lat1, lon1, lat2, lon2) {
+    document.getElementById('globe').style.display = 'none';
+    document.getElementById('map').style.display = 'block';
+
+    if (osmMap) osmMap.remove();
+
+    osmMap = L.map('map').setView([lat1, lon1], 2);
+
+    const baseMaps = {
+      'OpenStreetMap': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'),
+      'Esri Street Map': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}'),
+      'Esri Topographic': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}')
+    };
+
+    baseMaps['OpenStreetMap'].addTo(osmMap);
+
+    L.control.layers(baseMaps).addTo(osmMap);
+
+    L.marker([lat1, lon1]).addTo(osmMap).bindPopup('Titik 1').openPopup();
+    L.marker([lat2, lon2]).addTo(osmMap).bindPopup('Titik 2').openPopup();
+
+    L.polyline([[lat1, lon1], [lat2, lon2]], { color: 'blue' }).addTo(osmMap);
+  }
+
+  document.getElementById('calculate').addEventListener('click', () => {
+    const lat1 = parseFloat(document.getElementById('lat1').value);
+    const lon1 = parseFloat(document.getElementById('lon1').value);
+    const lat2 = parseFloat(document.getElementById('lat2').value);
+    const lon2 = parseFloat(document.getElementById('lon2').value);
+
+    if (isNaN(lat1) || isNaN(lon1) || isNaN(lat2) || isNaN(lon2)) {
+      alert('Masukkan koordinat dengan benar!');
+      return;
+    }
+
+    const distance = haversine(lat1, lon1, lat2, lon2).toFixed(3);
+    const bearings = calculateBearings(lat1, lon1, lat2, lon2);
+
+    document.getElementById('results').innerHTML = `
+      Jarak (GCD): ${distance} km <br>
+      Bearing Awal: ${bearings.initial.toFixed(2)}° <br>
+      Bearing Akhir: ${bearings.final.toFixed(2)}° <br>
+    `;
+
+    const mapType = document.getElementById('mapSelect').value;
+    if (mapType === 'globe') {
+      initGlobe(lat1, lon1, lat2, lon2);
+    } else {
+      init2DMap(lat1, lon1, lat2, lon2);
+    }
+  });
+
+  document.getElementById('mapSelect').addEventListener('change', () => {
+    const lat1 = parseFloat(document.getElementById('lat1').value);
+    const lon1 = parseFloat(document.getElementById('lon1').value);
+    const lat2 = parseFloat(document.getElementById('lat2').value);
+    const lon2 = parseFloat(document.getElementById('lon2').value);
+    const mapType = document.getElementById('mapSelect').value;
+
+    if (mapType === 'globe') {
+      initGlobe(lat1, lon1, lat2, lon2);
+    } else {
+      init2DMap(lat1, lon1, lat2, lon2);
+    }
+  });
+</script>
+
+</body>
+</html>
